@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, conversations, messages, interrupts, Conversation, Message, Interrupt } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,98 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// Conversation queries
+export async function getOrCreateConversation(userId: number, threadId: string): Promise<Conversation> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const existing = await db.select().from(conversations).where(eq(conversations.threadId, threadId)).limit(1);
+  if (existing.length > 0) {
+    return existing[0];
+  }
+
+  const result = await db.insert(conversations).values({
+    userId,
+    threadId,
+    title: "New Conversation",
+  });
+
+  const created = await db.select().from(conversations).where(eq(conversations.threadId, threadId)).limit(1);
+  return created[0];
+}
+
+export async function getConversationsByUser(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return db.select().from(conversations)
+    .where(eq(conversations.userId, userId))
+    .orderBy(desc(conversations.updatedAt));
+}
+
+export async function updateConversationTitle(conversationId: number, title: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return db.update(conversations)
+    .set({ title, updatedAt: new Date() })
+    .where(eq(conversations.id, conversationId));
+}
+
+// Message queries
+export async function addMessage(conversationId: number, role: "user" | "assistant" | "system", content: string, agentType?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return db.insert(messages).values({
+    conversationId,
+    role,
+    content,
+    agentType,
+  });
+}
+
+export async function getConversationMessages(conversationId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return db.select().from(messages)
+    .where(eq(messages.conversationId, conversationId))
+    .orderBy(messages.createdAt);
+}
+
+// Interrupt queries
+export async function createInterrupt(conversationId: number, messageId: number, interruptMessage: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return db.insert(interrupts).values({
+    conversationId,
+    messageId,
+    interruptMessage,
+    status: "pending",
+  });
+}
+
+export async function getPendingInterrupt(conversationId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.select().from(interrupts)
+    .where(and(
+      eq(interrupts.conversationId, conversationId),
+      eq(interrupts.status, "pending")
+    ))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function resolveInterrupt(interruptId: number, status: "approved" | "rejected") {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return db.update(interrupts)
+    .set({ status, resolvedAt: new Date() })
+    .where(eq(interrupts.id, interruptId));
+}

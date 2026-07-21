@@ -34,6 +34,7 @@
 - [x] Create conversation history UI
 - [ ] Add ability to view/restore previous conversations
 - [ ] Implement conversation clearing/deletion
+- [x] Create PROJECT_SETUP.md documentation
 
 ## Phase 6: Testing & Deployment
 - [x] Write vitest tests for chat procedures

@@ -21,6 +21,7 @@
 - [ ] Create web search agent
 - [ ] Implement routing logic between agents
 - [x] Create integration guide (LANGGRAPH_INTEGRATION.md)
+- [x] Create example agent implementation (server/agents/example.ts)
 
 ## Phase 4: Human-in-the-Loop
 - [x] Add interrupt handling for web search approval

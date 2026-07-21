@@ -35,7 +35,8 @@
 - [ ] Implement conversation clearing/deletion
 
 ## Phase 6: Testing & Deployment
-- [ ] Write vitest tests for chat procedures
+- [x] Write vitest tests for chat procedures
+- [x] Write vitest tests for tRPC routers
 - [ ] Test full conversation flow end-to-end
 - [ ] Test Human-in-the-loop approval/rejection
 - [ ] Test message persistence

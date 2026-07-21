@@ -20,6 +20,7 @@
 - [ ] Create summarizer agent
 - [ ] Create web search agent
 - [ ] Implement routing logic between agents
+- [x] Create integration guide (LANGGRAPH_INTEGRATION.md)
 
 ## Phase 4: Human-in-the-Loop
 - [x] Add interrupt handling for web search approval
@@ -37,9 +38,9 @@
 ## Phase 6: Testing & Deployment
 - [x] Write vitest tests for chat procedures
 - [x] Write vitest tests for tRPC routers
-- [ ] Test full conversation flow end-to-end
-- [ ] Test Human-in-the-loop approval/rejection
-- [ ] Test message persistence
+- [x] Test full conversation flow end-to-end
+- [x] Test Human-in-the-loop approval/rejection
+- [x] Test message persistence
 - [ ] Deploy to production
 
 ## Design System

@@ -110,6 +110,7 @@ export const appRouter = router({
             response: agentResult.response,
             agentType: agentResult.agentType,
             interruptRequired: agentResult.interruptRequired,
+            interruptMessage: agentResult.interruptMessage,
           };
         } catch (error) {
           console.error("Error processing message:", error);
@@ -120,6 +121,7 @@ export const appRouter = router({
             response: errorMessage,
             agentType: "error",
             interruptRequired: false,
+            interruptMessage: undefined,
           };
         }
       }),

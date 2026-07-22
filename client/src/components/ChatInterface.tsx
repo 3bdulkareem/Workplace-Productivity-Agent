@@ -84,23 +84,38 @@ export function ChatInterface({ conversationId }: { conversationId: number }) {
         content: userMessage,
       }]);
 
-      // Simulate agent response (in real app, this would call LangGraph backend)
-      setActiveAgent("rag");
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Call the real LangGraph agent through tRPC
+      setActiveAgent("processing");
+      const result = await sendMessageMutation.mutateAsync({
+        conversationId,
+        content: userMessage,
+      });
 
-      const assistantResponse = `I received your message: "${userMessage}". This is a simulated response.`;
-      
+      // Set the active agent based on the result
+      if (result.agentType) {
+        setActiveAgent(result.agentType);
+      }
+
+      // Add the real assistant response
       await addAssistantMutation.mutateAsync({
         conversationId,
-        content: assistantResponse,
-        agentType: "rag",
+        content: result.response,
+        agentType: result.agentType || "rag",
       });
 
       setMessages(prev => [...prev, {
         role: "assistant",
-        content: assistantResponse,
-        agentType: "rag",
+        content: result.response,
+        agentType: result.agentType || "rag",
       }]);
+
+      // Check if there's an interrupt
+      if (result.interruptRequired && result.interruptMessage) {
+        setPendingInterrupt({
+          id: 0,
+          interruptMessage: result.interruptMessage,
+        });
+      }
 
       setActiveAgent(null);
     } catch (error) {

@@ -1,7 +1,6 @@
 # Workplace Productivity Agent
 
-**Full Name:** [Your Full Name]
-**Program/Cohort:** [Your Program/Cohort]
+**Student Name:** عبدالكريم المالكي
 
 ## Project Overview
 

@@ -10,13 +10,12 @@ import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import * as db from "./db";
 import { nanoid } from "nanoid";
+import { COOKIE_NAME } from "../shared/const";
 import { 
   processMessage, 
   resumeAfterApproval,
   getConversationHistory 
 } from "./agents/integrated-agent";
-
-const COOKIE_NAME = "session";
 
 export const appRouter = router({
   system: systemRouter,

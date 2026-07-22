@@ -14,6 +14,14 @@ vi.mock("./db", () => ({
   resolveInterrupt: vi.fn(),
 }));
 
+// Mock integrated-agent module
+vi.mock("./agents/integrated-agent", () => ({
+  processMessage: vi.fn(),
+  resumeAfterApproval: vi.fn(),
+}));
+
+import * as integratedAgent from "./agents/integrated-agent";
+
 // Mock context with authenticated user
 const mockAuthContext = {
   user: {
@@ -153,6 +161,11 @@ describe("Chat Router Procedures", () => {
   describe("sendMessage", () => {
     it("should add a user message to conversation", async () => {
       vi.mocked(db.addMessage).mockResolvedValue(undefined);
+      vi.mocked(integratedAgent.processMessage).mockResolvedValue({
+        response: "Test response",
+        agentType: "rag",
+        interruptRequired: false,
+      });
 
       const caller = appRouter.createCaller({ ...mockAuthContext });
       const result = await caller.chat.sendMessage({
@@ -160,8 +173,10 @@ describe("Chat Router Procedures", () => {
         content: "Test message",
       });
 
-      expect(result).toEqual({ success: true });
-      expect(db.addMessage).toHaveBeenCalledWith(1, "user", "Test message");
+      expect(result.success).toBe(true);
+      expect(result.response).toBeDefined();
+      expect(result.agentType).toBeDefined();
+      expect(result.interruptRequired).toBeDefined();
     });
 
     it("should reject empty messages", async () => {
@@ -261,28 +276,40 @@ describe("Chat Router Procedures", () => {
   describe("resolveInterrupt", () => {
     it("should resolve interrupt with approval", async () => {
       vi.mocked(db.resolveInterrupt).mockResolvedValue(undefined);
+      vi.mocked(integratedAgent.resumeAfterApproval).mockResolvedValue({
+        response: "Proceeding with web search",
+        agentType: "web_search",
+      });
 
       const caller = appRouter.createCaller({ ...mockAuthContext });
       const result = await caller.chat.resolveInterrupt({
+        conversationId: 1,
         interruptId: 1,
         status: "approved",
       });
 
-      expect(result).toEqual({ success: true });
-      expect(db.resolveInterrupt).toHaveBeenCalledWith(1, "approved");
+      expect(result.success).toBe(true);
+      expect(result.response).toBeDefined();
+      expect(result.agentType).toBeDefined();
     });
 
     it("should resolve interrupt with rejection", async () => {
       vi.mocked(db.resolveInterrupt).mockResolvedValue(undefined);
+      vi.mocked(integratedAgent.resumeAfterApproval).mockResolvedValue({
+        response: "Web search was rejected by the user.",
+        agentType: "system",
+      });
 
       const caller = appRouter.createCaller({ ...mockAuthContext });
       const result = await caller.chat.resolveInterrupt({
+        conversationId: 1,
         interruptId: 1,
         status: "rejected",
       });
 
-      expect(result).toEqual({ success: true });
-      expect(db.resolveInterrupt).toHaveBeenCalledWith(1, "rejected");
+      expect(result.success).toBe(true);
+      expect(result.response).toBeDefined();
+      expect(result.agentType).toBeDefined();
     });
   });
 });

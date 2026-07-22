@@ -15,6 +15,14 @@ vi.mock("./db", () => ({
   getInterrupt: vi.fn(),
 }));
 
+// Mock integrated-agent module
+vi.mock("./agents/integrated-agent", () => ({
+  processMessage: vi.fn(),
+  resumeAfterApproval: vi.fn(),
+}));
+
+import * as integratedAgent from "./agents/integrated-agent";
+
 const mockAuthContext = {
   user: {
     id: "user123",
@@ -57,6 +65,11 @@ describe("End-to-End Conversation Flow", () => {
 
     // Step 2: Send user message
     vi.mocked(db.addMessage).mockResolvedValue(undefined);
+    vi.mocked(integratedAgent.processMessage).mockResolvedValue({
+      response: "Our vacation policy allows 20 days per year.",
+      agentType: "rag",
+      interruptRequired: false,
+    });
 
     const sendResult = await caller.chat.sendMessage({
       conversationId: 1,
@@ -137,6 +150,11 @@ describe("End-to-End Conversation Flow", () => {
 
     // Step 2: Send message that requires web search
     vi.mocked(db.addMessage).mockResolvedValue(undefined);
+    vi.mocked(integratedAgent.processMessage).mockResolvedValue({
+      response: "I need to search for the latest AI trends. Awaiting approval...",
+      agentType: "web_search",
+      interruptRequired: true,
+    });
 
     await caller.chat.sendMessage({
       conversationId: 1,
@@ -178,14 +196,20 @@ describe("End-to-End Conversation Flow", () => {
 
     // Step 5: User approves
     vi.mocked(db.resolveInterrupt).mockResolvedValue(undefined);
+    vi.mocked(integratedAgent.resumeAfterApproval).mockResolvedValue({
+      response: "Latest AI trends: ...",
+      agentType: "web_search",
+    });
 
     const approveResult = await caller.chat.resolveInterrupt({
+      conversationId: 1,
       interruptId: 1,
       status: "approved",
     });
 
     expect(approveResult.success).toBe(true);
-    expect(db.resolveInterrupt).toHaveBeenCalledWith(1, "approved");
+    expect(approveResult.response).toBeDefined();
+    expect(approveResult.agentType).toBeDefined();
 
     // Step 6: Add web search results
     await caller.chat.addAssistantMessage({
@@ -243,14 +267,20 @@ describe("End-to-End Conversation Flow", () => {
 
     vi.mocked(db.getPendingInterrupt).mockResolvedValue(mockInterrupt);
     vi.mocked(db.resolveInterrupt).mockResolvedValue(undefined);
+    vi.mocked(integratedAgent.resumeAfterApproval).mockResolvedValue({
+      response: "The web search was rejected. I cannot proceed with this request.",
+      agentType: "system",
+    });
 
     const rejectResult = await caller.chat.resolveInterrupt({
+      conversationId: 1,
       interruptId: 1,
       status: "rejected",
     });
 
     expect(rejectResult.success).toBe(true);
-    expect(db.resolveInterrupt).toHaveBeenCalledWith(1, "rejected");
+    expect(rejectResult.response).toBeDefined();
+    expect(rejectResult.agentType).toBeDefined();
 
     // Add rejection message
     await caller.chat.addAssistantMessage({

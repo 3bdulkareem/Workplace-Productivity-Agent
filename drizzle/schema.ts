@@ -71,3 +71,19 @@ export const interrupts = mysqlTable("interrupts", {
 
 export type Interrupt = typeof interrupts.$inferSelect;
 export type InsertInterrupt = typeof interrupts.$inferInsert;
+
+/**
+ * Checkpoints table: stores LangGraph agent state checkpoints
+ */
+export const checkpoints = mysqlTable("checkpoints", {
+  id: int("id").autoincrement().primaryKey(),
+  threadId: varchar("threadId", { length: 64 }).notNull(),
+  userId: int("userId").notNull().references(() => users.id),
+  checkpoint: text("checkpoint").notNull(), // JSON string of agent state
+  metadata: text("metadata"), // JSON string of metadata
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Checkpoint = typeof checkpoints.$inferSelect;
+export type InsertCheckpoint = typeof checkpoints.$inferInsert;

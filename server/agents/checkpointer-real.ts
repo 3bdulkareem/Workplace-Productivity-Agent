@@ -3,9 +3,13 @@
  * 
  * Implements checkpoint storage for:
  * - Short-term memory (in-memory state during execution)
- * - Long-term memory (database persistence)
+ * - Long-term memory (database persistence via checkpoints table)
  * - Thread management
  */
+
+import { getDb } from "../db";
+import { checkpoints, type InsertCheckpoint } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
 
 interface CheckpointData {
   threadId: string;
@@ -38,15 +42,50 @@ export class DatabaseCheckpointer {
 
     this.shortTermMemory.set(threadId, data);
 
-    // Long-term memory (database)
+    // Long-term memory (database persistence)
     try {
-      console.log(
-        `[Checkpointer] Saved checkpoint for thread ${threadId} to short-term memory`
-      );
-      // In production: await db.saveCheckpoint(data);
-      // This would insert/update the checkpoint in the database
+      const db = await getDb();
+      if (!db) {
+        console.warn("[Checkpointer] Database not available, skipping persistence");
+        return;
+      }
+
+      // Convert userId from string to number if needed
+      const userIdNum = typeof userId === "string" ? parseInt(userId, 10) : userId;
+
+      // Check if checkpoint exists
+      const existing = await db
+        .select()
+        .from(checkpoints)
+        .where(eq(checkpoints.threadId, threadId))
+        .limit(1);
+
+      if (existing.length > 0) {
+        // Update existing checkpoint
+        await db
+          .update(checkpoints)
+          .set({
+            checkpoint: JSON.stringify(checkpoint),
+            metadata: JSON.stringify(metadata),
+            updatedAt: new Date(),
+          })
+          .where(eq(checkpoints.threadId, threadId));
+
+        console.log(`[Checkpointer] Updated checkpoint for thread ${threadId} in database`);
+      } else {
+        // Insert new checkpoint
+        const insertData: InsertCheckpoint = {
+          threadId,
+          userId: userIdNum,
+          checkpoint: JSON.stringify(checkpoint),
+          metadata: JSON.stringify(metadata),
+        };
+
+        await db.insert(checkpoints).values(insertData);
+        console.log(`[Checkpointer] Saved checkpoint for thread ${threadId} to database`);
+      }
     } catch (error) {
-      console.error("Error saving checkpoint to database:", error);
+      console.error("[Checkpointer] Error saving checkpoint to database:", error);
     }
   }
 
@@ -65,13 +104,35 @@ export class DatabaseCheckpointer {
 
     // Try database (long-term memory)
     try {
-      // In production: const checkpoint = await db.getCheckpoint(threadId);
-      // if (checkpoint) return checkpoint;
-      console.log(
-        `[Checkpointer] Attempted to retrieve checkpoint for thread ${threadId} from database`
-      );
+      const db = await getDb();
+      if (!db) {
+        console.warn("[Checkpointer] Database not available");
+        return null;
+      }
+
+      const result = await db
+        .select()
+        .from(checkpoints)
+        .where(eq(checkpoints.threadId, threadId))
+        .limit(1);
+
+      if (result.length > 0) {
+        const checkpoint = result[0];
+        const data: CheckpointData = {
+          threadId: checkpoint.threadId,
+          userId: String(checkpoint.userId),
+          checkpoint: JSON.parse(checkpoint.checkpoint),
+          timestamp: checkpoint.updatedAt.getTime(),
+          metadata: checkpoint.metadata ? JSON.parse(checkpoint.metadata) : {},
+        };
+
+        console.log(
+          `[Checkpointer] Retrieved checkpoint for thread ${threadId} from database`
+        );
+        return data;
+      }
     } catch (error) {
-      console.error("Error retrieving checkpoint from database:", error);
+      console.error("[Checkpointer] Error retrieving checkpoint from database:", error);
     }
 
     return null;
@@ -81,28 +142,41 @@ export class DatabaseCheckpointer {
    * List all checkpoints for a user
    */
   async listForUser(userId: string, limit: number = 10): Promise<CheckpointData[]> {
-    const checkpoints: CheckpointData[] = [];
+    const checkpointsList: CheckpointData[] = [];
 
-    // From short-term memory
-    this.shortTermMemory.forEach((checkpoint) => {
-      if (checkpoint.userId === userId) {
-        checkpoints.push(checkpoint);
-      }
-    });
-
-    // From database (long-term memory)
     try {
-      // In production: const dbCheckpoints = await db.listCheckpoints(userId, limit);
-      // checkpoints.push(...dbCheckpoints);
-      console.log(`[Checkpointer] Listed ${checkpoints.length} checkpoints for user ${userId}`);
+      const db = await getDb();
+      if (!db) {
+        console.warn("[Checkpointer] Database not available");
+        return [];
+      }
+
+      const userIdNum = typeof userId === "string" ? parseInt(userId, 10) : userId;
+
+      const results = await db
+        .select()
+        .from(checkpoints)
+        .where(eq(checkpoints.userId, userIdNum))
+        .limit(limit);
+
+      for (const checkpoint of results) {
+        checkpointsList.push({
+          threadId: checkpoint.threadId,
+          userId: String(checkpoint.userId),
+          checkpoint: JSON.parse(checkpoint.checkpoint),
+          timestamp: checkpoint.updatedAt.getTime(),
+          metadata: checkpoint.metadata ? JSON.parse(checkpoint.metadata) : {},
+        });
+      }
+
+      console.log(
+        `[Checkpointer] Listed ${checkpointsList.length} checkpoints for user ${userId}`
+      );
     } catch (error) {
-      console.error("Error listing checkpoints from database:", error);
+      console.error("[Checkpointer] Error listing checkpoints:", error);
     }
 
-    // Sort by timestamp (newest first) and limit
-    return checkpoints
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, limit);
+    return checkpointsList;
   }
 
   /**
@@ -120,10 +194,23 @@ export class DatabaseCheckpointer {
 
       // Update database
       try {
+        const db = await getDb();
+        if (!db) {
+          console.warn("[Checkpointer] Database not available");
+          return;
+        }
+
+        await db
+          .update(checkpoints)
+          .set({
+            checkpoint: JSON.stringify(checkpoint.checkpoint),
+            updatedAt: new Date(),
+          })
+          .where(eq(checkpoints.threadId, threadId));
+
         console.log(`[Checkpointer] Updated checkpoint for thread ${threadId}`);
-        // In production: await db.updateCheckpoint(threadId, checkpoint);
       } catch (error) {
-        console.error("Error updating checkpoint:", error);
+        console.error("[Checkpointer] Error updating checkpoint:", error);
       }
     }
   }
@@ -139,13 +226,32 @@ export class DatabaseCheckpointer {
   /**
    * Get all thread IDs for a user
    */
-  getThreadsForUser(userId: string): string[] {
+  async getThreadsForUser(userId: string): Promise<string[]> {
     const threads: string[] = [];
-    this.shortTermMemory.forEach((checkpoint, threadId) => {
-      if (checkpoint.userId === userId) {
-        threads.push(threadId);
+
+    try {
+      const db = await getDb();
+      if (!db) {
+        console.warn("[Checkpointer] Database not available");
+        return [];
       }
-    });
+
+      const userIdNum = typeof userId === "string" ? parseInt(userId, 10) : userId;
+
+      const results = await db
+        .select()
+        .from(checkpoints)
+        .where(eq(checkpoints.userId, userIdNum));
+
+      for (const checkpoint of results) {
+        threads.push(checkpoint.threadId);
+      }
+
+      console.log(`[Checkpointer] Found ${threads.length} threads for user ${userId}`);
+    } catch (error) {
+      console.error("[Checkpointer] Error getting threads:", error);
+    }
+
     return threads;
   }
 

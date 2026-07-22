@@ -121,6 +121,7 @@ export function ChatInterface({ conversationId }: { conversationId: number }) {
     setResolveLoading(true);
     try {
       await resolveInterruptMutation.mutateAsync({
+        conversationId,
         interruptId: pendingInterrupt.id,
         status: approved ? "approved" : "rejected",
       });

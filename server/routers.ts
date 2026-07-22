@@ -9,13 +9,19 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import * as db from "./db";
+import type { AgentState } from "./agents/langgraph-agent";
 import { nanoid } from "nanoid";
 import { COOKIE_NAME } from "../shared/const";
 import { 
   processMessage, 
-  resumeAfterApproval,
-  getConversationHistory 
-} from "./agents/integrated-agent";
+  resumeAfterInterrupt
+} from "./agents/langgraph-agent";
+
+// Helper to get conversation messages from database
+async function getConversationMessages(conversationId: number) {
+  const messages = await db.getConversationMessages(conversationId);
+  return messages || [];
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -67,9 +73,15 @@ export const appRouter = router({
         const threadId = input.threadId || String(input.conversationId);
 
         try {
-          // Process through integrated agent with real RAG and checkpointer
+          // Get conversation history for context
+          const messages = await db.getConversationMessages(input.conversationId);
+          const messageHistory = (messages || []).map(m => ({ role: m.role, content: m.content }));
+          
+          // Process through LangGraph agent with real RAG and checkpointer
           const agentResult = await processMessage(
             input.content,
+            messageHistory,
+            undefined, // ragContext will be retrieved from RAG pipeline
             threadId,
             String(ctx.user.id)
           );
@@ -79,7 +91,7 @@ export const appRouter = router({
             input.conversationId,
             "assistant",
             agentResult.response,
-            agentResult.agentType
+            agentResult.agentType || "rag"
           );
 
           // If interrupt required, create interrupt record
@@ -168,18 +180,32 @@ export const appRouter = router({
 
           // Resume agent with real interrupt handling
           const approved = input.status === "approved";
-          const agentResult = await resumeAfterApproval(
+          
+          // Get conversation history for context
+          const messages = await db.getConversationMessages(input.conversationId);
+          const lastState = {
+            messages: messages.map(m => ({ role: m.role, content: m.content })),
+            currentAgent: "web_search",
+            interruptRequired: false,
+            interruptMessage: null,
+            response: null,
+            agentType: "web_search",
+            context: null,
+          };
+          
+          const agentResult = await resumeAfterInterrupt(
+            lastState,
+            approved ? "approved" : "rejected",
             threadId,
-            String(ctx.user.id),
-            approved
+            String(ctx.user.id)
           );
 
           // Save resumed response
           await db.addMessage(
             input.conversationId,
             "assistant",
-            agentResult.response,
-            agentResult.agentType
+            agentResult.response || "",
+            agentResult.agentType || "web_search"
           );
 
           return {

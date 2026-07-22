@@ -14,13 +14,13 @@ vi.mock("./db", () => ({
   resolveInterrupt: vi.fn(),
 }));
 
-// Mock integrated-agent module
-vi.mock("./agents/integrated-agent", () => ({
+// Mock langgraph-agent module
+vi.mock("./agents/langgraph-agent", () => ({
   processMessage: vi.fn(),
-  resumeAfterApproval: vi.fn(),
+  resumeAfterInterrupt: vi.fn(),
 }));
 
-import * as integratedAgent from "./agents/integrated-agent";
+import * as langGraphAgent from "./agents/langgraph-agent";
 
 // Mock context with authenticated user
 const mockAuthContext = {
@@ -161,7 +161,7 @@ describe("Chat Router Procedures", () => {
   describe("sendMessage", () => {
     it("should add a user message to conversation", async () => {
       vi.mocked(db.addMessage).mockResolvedValue(undefined);
-      vi.mocked(integratedAgent.processMessage).mockResolvedValue({
+      vi.mocked(langGraphAgent.processMessage).mockResolvedValue({
         response: "Test response",
         agentType: "rag",
         interruptRequired: false,
@@ -276,7 +276,7 @@ describe("Chat Router Procedures", () => {
   describe("resolveInterrupt", () => {
     it("should resolve interrupt with approval", async () => {
       vi.mocked(db.resolveInterrupt).mockResolvedValue(undefined);
-      vi.mocked(integratedAgent.resumeAfterApproval).mockResolvedValue({
+      vi.mocked(langGraphAgent.resumeAfterInterrupt).mockResolvedValue({
         response: "Proceeding with web search",
         agentType: "web_search",
       });
@@ -295,7 +295,7 @@ describe("Chat Router Procedures", () => {
 
     it("should resolve interrupt with rejection", async () => {
       vi.mocked(db.resolveInterrupt).mockResolvedValue(undefined);
-      vi.mocked(integratedAgent.resumeAfterApproval).mockResolvedValue({
+      vi.mocked(langGraphAgent.resumeAfterInterrupt).mockResolvedValue({
         response: "Web search was rejected by the user.",
         agentType: "system",
       });

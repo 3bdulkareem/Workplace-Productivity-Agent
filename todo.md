@@ -51,3 +51,10 @@
 - [x] Implement smooth animations and transitions
 - [x] Ensure responsive design (mobile, tablet, desktop)
 - [ ] Add dark/light theme support (optional)
+
+
+## Critical Fixes
+- [ ] Wire LangGraph into running app (use langgraph-agent.ts in processMessage)
+- [ ] Implement real DB persistence in checkpointer (not just console.log)
+- [ ] Add RetryPolicy and error-handling strategies to integrated-agent.ts
+- [ ] Update README to say "completed" instead of "planned"

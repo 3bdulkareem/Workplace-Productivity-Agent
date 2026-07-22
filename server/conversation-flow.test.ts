@@ -15,13 +15,13 @@ vi.mock("./db", () => ({
   getInterrupt: vi.fn(),
 }));
 
-// Mock integrated-agent module
-vi.mock("./agents/integrated-agent", () => ({
+// Mock langgraph-agent module
+vi.mock("./agents/langgraph-agent", () => ({
   processMessage: vi.fn(),
-  resumeAfterApproval: vi.fn(),
+  resumeAfterInterrupt: vi.fn(),
 }));
 
-import * as integratedAgent from "./agents/integrated-agent";
+import * as langGraphAgent from "./agents/langgraph-agent";
 
 const mockAuthContext = {
   user: {
@@ -65,7 +65,7 @@ describe("End-to-End Conversation Flow", () => {
 
     // Step 2: Send user message
     vi.mocked(db.addMessage).mockResolvedValue(undefined);
-    vi.mocked(integratedAgent.processMessage).mockResolvedValue({
+    vi.mocked(langGraphAgent.processMessage).mockResolvedValue({
       response: "Our vacation policy allows 20 days per year.",
       agentType: "rag",
       interruptRequired: false,
@@ -150,7 +150,7 @@ describe("End-to-End Conversation Flow", () => {
 
     // Step 2: Send message that requires web search
     vi.mocked(db.addMessage).mockResolvedValue(undefined);
-    vi.mocked(integratedAgent.processMessage).mockResolvedValue({
+    vi.mocked(langGraphAgent.processMessage).mockResolvedValue({
       response: "I need to search for the latest AI trends. Awaiting approval...",
       agentType: "web_search",
       interruptRequired: true,
@@ -196,7 +196,7 @@ describe("End-to-End Conversation Flow", () => {
 
     // Step 5: User approves
     vi.mocked(db.resolveInterrupt).mockResolvedValue(undefined);
-    vi.mocked(integratedAgent.resumeAfterApproval).mockResolvedValue({
+    vi.mocked(langGraphAgent.resumeAfterInterrupt).mockResolvedValue({
       response: "Latest AI trends: ...",
       agentType: "web_search",
     });
@@ -267,7 +267,7 @@ describe("End-to-End Conversation Flow", () => {
 
     vi.mocked(db.getPendingInterrupt).mockResolvedValue(mockInterrupt);
     vi.mocked(db.resolveInterrupt).mockResolvedValue(undefined);
-    vi.mocked(integratedAgent.resumeAfterApproval).mockResolvedValue({
+    vi.mocked(langGraphAgent.resumeAfterInterrupt).mockResolvedValue({
       response: "The web search was rejected. I cannot proceed with this request.",
       agentType: "system",
     });

@@ -9,7 +9,7 @@
  * - Persistent state with checkpointer
  */
 
-import { retrieveRAGContext, generateRAGResponse } from "./rag-real";
+import { ragAgent } from "./rag-real";
 import { getCheckpointer } from "./checkpointer-real";
 import { invokeLLM, type Message } from "../_core/llm";
 
@@ -29,7 +29,7 @@ export interface AgentState {
 /**
  * RAG Agent - Answers questions based on company policies with real embeddings
  */
-async function ragAgent(state: AgentState): Promise<Partial<AgentState>> {
+async function ragAgentNode(state: AgentState): Promise<Partial<AgentState>> {
   console.log("[RAG Agent] Processing with real embeddings");
 
   const lastMessage = state.messages[state.messages.length - 1];
@@ -37,12 +37,9 @@ async function ragAgent(state: AgentState): Promise<Partial<AgentState>> {
     ? lastMessage.content 
     : String(lastMessage.content);
 
-  // Retrieve relevant documents using real embeddings
-  const ragResult = await retrieveRAGContext(userQuery);
-  console.log(`[RAG Agent] Retrieved ${ragResult.documents.length} documents`);
-
-  // Generate response using LLM with context
-  const response = await generateRAGResponse(userQuery, ragResult);
+  // Call RAG agent with real embeddings and LLM
+  const response = await ragAgent(userQuery);
+  console.log(`[RAG Agent] Generated response`);
 
   return {
     result: response,
@@ -163,14 +160,14 @@ async function executeAgent(state: AgentState): Promise<AgentState> {
   let result: Partial<AgentState>;
   
   if (agentType.includes("rag") || agentType.includes("policy")) {
-    result = await ragAgent(state);
+    result = await ragAgentNode(state);
   } else if (agentType.includes("summar")) {
     result = await summarizerAgent(state);
   } else if (agentType.includes("web") || agentType.includes("search")) {
     result = await webSearchAgent(state);
   } else {
     // Default to RAG
-    result = await ragAgent(state);
+    result = await ragAgentNode(state);
   }
 
   return { ...state, ...result };

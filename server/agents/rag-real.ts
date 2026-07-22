@@ -1,15 +1,15 @@
 /**
- * Real RAG Pipeline with Embeddings and Vector Store
+ * Real RAG Pipeline with Local Embeddings and Manus LLM
  * 
  * This module implements a production-grade RAG system with:
  * - Document loading and chunking
- * - OpenAI embeddings
- * - In-memory vector store (HNSW-like)
+ * - Local TF-IDF embeddings (no external API needed)
+ * - In-memory vector store
  * - Semantic similarity search
+ * - Manus built-in LLM for generation
  */
 
-import { OpenAIEmbeddings } from "@langchain/openai";
-import { invokeLLM, type Message } from "../_core/llm";
+import { invokeLLM, type Message, type InvokeResult } from "../_core/llm";
 
 interface StoredDocument {
   id: string;
@@ -24,24 +24,68 @@ interface RAGResult {
   context: string;
 }
 
+/**
+ * Simple TF-IDF based embeddings (no external API needed)
+ */
+class LocalEmbeddings {
+  private vocabulary: Map<string, number> = new Map();
+  private documentFrequency: Map<string, number> = new Map();
+  private totalDocs = 0;
+
+  addDocument(text: string) {
+    const words = this.tokenize(text);
+    const uniqueWords = new Set(words);
+    
+    uniqueWords.forEach(word => {
+      this.documentFrequency.set(word, (this.documentFrequency.get(word) || 0) + 1);
+    });
+    
+    words.forEach(word => {
+      if (!this.vocabulary.has(word)) {
+        this.vocabulary.set(word, this.vocabulary.size);
+      }
+    });
+    
+    this.totalDocs++;
+  }
+
+  async embedQuery(text: string): Promise<number[]> {
+    const words = this.tokenize(text);
+    const embedding = new Array(Math.min(this.vocabulary.size, 100)).fill(0);
+    
+    words.forEach(word => {
+      const idx = this.vocabulary.get(word);
+      if (idx !== undefined && idx < embedding.length) {
+        const tf = words.filter(w => w === word).length / words.length;
+        const idf = Math.log((this.totalDocs + 1) / (this.documentFrequency.get(word) || 1));
+        embedding[idx] = tf * idf;
+      }
+    });
+    
+    return embedding;
+  }
+
+  private tokenize(text: string): string[] {
+    return text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 2);
+  }
+}
+
 class SimpleVectorStore {
   private documents: StoredDocument[] = [];
-  private embeddings: OpenAIEmbeddings | null = null;
+  private embeddings: LocalEmbeddings;
 
-  async initialize() {
-    if (!this.embeddings) {
-      this.embeddings = new OpenAIEmbeddings({
-        modelName: "text-embedding-3-small",
-        apiKey: process.env.OPENAI_API_KEY,
-      });
-    }
+  constructor() {
+    this.embeddings = new LocalEmbeddings();
   }
 
   async addDocuments(docs: Array<{ text: string; metadata?: Record<string, any> }>) {
-    if (!this.embeddings) await this.initialize();
-
     for (const doc of docs) {
-      const embedding = await this.embeddings!.embedQuery(doc.text);
+      this.embeddings.addDocument(doc.text);
+      const embedding = await this.embeddings.embedQuery(doc.text);
       this.documents.push({
         id: `doc-${Date.now()}-${Math.random()}`,
         text: doc.text,
@@ -51,95 +95,84 @@ class SimpleVectorStore {
     }
   }
 
+  async search(query: string, topK = 3): Promise<StoredDocument[]> {
+    const queryEmbedding = await this.embeddings.embedQuery(query);
+    
+    const scored = this.documents.map(doc => ({
+      doc,
+      score: this.cosineSimilarity(queryEmbedding, doc.embedding),
+    }));
+    
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK)
+      .map(item => item.doc);
+  }
+
   private cosineSimilarity(a: number[], b: number[]): number {
+    const minLen = Math.min(a.length, b.length);
     let dotProduct = 0;
     let normA = 0;
     let normB = 0;
 
-    for (let i = 0; i < a.length; i++) {
+    for (let i = 0; i < minLen; i++) {
       dotProduct += a[i] * b[i];
       normA += a[i] * a[i];
       normB += b[i] * b[i];
     }
 
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-  }
-
-  async search(query: string, k: number = 3): Promise<StoredDocument[]> {
-    if (!this.embeddings) await this.initialize();
-
-    const queryEmbedding = await this.embeddings!.embedQuery(query);
-
-    const scored = this.documents.map((doc) => ({
-      doc,
-      score: this.cosineSimilarity(queryEmbedding, doc.embedding),
-    }));
-
-    return scored
-      .sort((a, b) => b.score - a.score)
-      .slice(0, k)
-      .map((item) => item.doc);
+    const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+    return denominator === 0 ? 0 : dotProduct / denominator;
   }
 }
 
 // Global vector store instance
 let vectorStore: SimpleVectorStore | null = null;
-let initialized = false;
 
+/**
+ * Initialize RAG pipeline with company policies
+ */
 export async function initializeRAG() {
-  if (initialized) return;
+  if (vectorStore) return vectorStore;
 
   vectorStore = new SimpleVectorStore();
-  await vectorStore.initialize();
 
-  // Load company policies
   const policies = [
     {
-      text: `Vacation Policy: All full-time employees are entitled to 20 days of paid vacation per year. 
-      Part-time employees receive 10 days. Vacation requests must be submitted 2 weeks in advance. 
-      Unused vacation days can be carried over to the next year up to a maximum of 5 days.`,
-      metadata: { type: "policy", category: "vacation" },
+      text: "Company Leave Policy: Employees are entitled to 20 days of annual leave per year. Leave must be requested at least 2 weeks in advance. Emergency leave can be approved with immediate notice.",
+      metadata: { category: "HR", policy: "Leave" },
     },
     {
-      text: `Remote Work Policy: Employees may work remotely up to 3 days per week. 
-      Remote work arrangements must be approved by the manager. 
-      Core hours are 10 AM to 3 PM in the employee's local timezone. 
-      All company equipment must be secured when working remotely.`,
-      metadata: { type: "policy", category: "remote-work" },
+      text: "Remote Work Policy: Employees can work from home up to 3 days per week. Remote work must be approved by manager. Core hours are 10 AM to 4 PM.",
+      metadata: { category: "HR", policy: "Remote Work" },
     },
     {
-      text: `Professional Development: The company provides up to $2,000 per employee per year for professional development. 
-      This includes training courses, certifications, and conference attendance. 
-      Employees must discuss development plans with their manager and submit requests for approval.`,
-      metadata: { type: "policy", category: "development" },
+      text: "Code of Conduct: All employees must maintain professional behavior. Harassment and discrimination are strictly prohibited. Violations will result in disciplinary action.",
+      metadata: { category: "HR", policy: "Code of Conduct" },
     },
     {
-      text: `Sick Leave Policy: Employees are entitled to 10 days of paid sick leave per year. 
-      Sick leave can be used for personal illness or to care for immediate family members. 
-      Employees must notify their manager as soon as possible when taking sick leave.`,
-      metadata: { type: "policy", category: "sick-leave" },
+      text: "Expense Policy: All business expenses must be approved before purchase. Receipts must be submitted within 7 days. Personal expenses will not be reimbursed.",
+      metadata: { category: "Finance", policy: "Expenses" },
     },
     {
-      text: `Code of Conduct: All employees must maintain professional behavior and treat colleagues with respect. 
-      Discrimination, harassment, and bullying are strictly prohibited. 
-      Violations of the code of conduct may result in disciplinary action up to and including termination.`,
-      metadata: { type: "policy", category: "conduct" },
+      text: "Data Security Policy: All company data must be encrypted. Passwords must be changed every 90 days. Unauthorized access is prohibited and will be reported to security.",
+      metadata: { category: "IT", policy: "Security" },
     },
   ];
 
   await vectorStore.addDocuments(policies);
-  initialized = true;
+  return vectorStore;
 }
 
-export async function retrieveRAGContext(query: string): Promise<RAGResult> {
-  if (!vectorStore || !initialized) {
-    await initializeRAG();
-  }
-
-  const documents = await vectorStore!.search(query, 3);
-
+/**
+ * Search for relevant documents using RAG
+ */
+export async function searchRAG(query: string): Promise<RAGResult> {
+  const store = await initializeRAG();
+  const documents = await store.search(query, 3);
+  
   const context = documents
-    .map((doc, i) => `[Source ${i + 1}]: ${doc.text}`)
+    .map(doc => `[${doc.metadata.category}] ${doc.text}`)
     .join("\n\n");
 
   return {
@@ -149,37 +182,52 @@ export async function retrieveRAGContext(query: string): Promise<RAGResult> {
   };
 }
 
-export async function generateRAGResponse(
-  query: string,
-  ragResult: RAGResult
-): Promise<string> {
-  const systemPrompt = `You are a helpful company assistant. Answer questions based on the provided company policies.
-Be accurate and cite the relevant policy when answering.
+/**
+ * RAG Agent that retrieves documents and generates responses
+ */
+export async function ragAgent(userMessage: string): Promise<string> {
+  try {
+    // Search for relevant documents
+    const ragResult = await searchRAG(userMessage);
+    
+    // If no relevant documents found
+    if (ragResult.documents.length === 0) {
+      return "I couldn't find relevant company policies for your question. Please contact HR for more information.";
+    }
+
+    // Generate response using Manus LLM with RAG context
+    const systemPrompt = `You are a helpful company assistant. Use the provided company policies to answer questions accurately and professionally. If the information is not in the policies, say so.
 
 Company Policies:
 ${ragResult.context}`;
 
-  const messages: Message[] = [
-    {
-      role: "system",
-      content: systemPrompt,
-    },
-    {
-      role: "user",
-      content: query,
-    },
-  ];
+    const messages: Message[] = [
+      { role: "user", content: userMessage }
+    ];
 
-  const response = await invokeLLM({ messages });
+    // Add system message to messages
+    const messagesWithSystem: Message[] = [
+      { role: "system", content: systemPrompt },
+      ...messages
+    ];
 
-  // Extract text from response
-  if (response.choices && response.choices.length > 0) {
-    const content = response.choices[0].message.content;
-    return typeof content === "string" ? content : String(content);
+    const response = await invokeLLM({
+      model: "gpt-4o-mini",
+      messages: messagesWithSystem,
+    });
+
+    const content = response.choices[0]?.message.content;
+    if (typeof content === "string") {
+      return content;
+    } else if (Array.isArray(content)) {
+      return content
+        .filter((c: any) => c.type === "text")
+        .map((c: any) => c.text)
+        .join(" ");
+    }
+    return "No response generated.";
+  } catch (error) {
+    console.error("[RAG Agent] Error:", error);
+    return "I encountered an error while processing your request. Please try again.";
   }
-
-  return "Unable to generate response";
 }
-
-
-export { SimpleVectorStore };

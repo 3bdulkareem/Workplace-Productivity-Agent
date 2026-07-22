@@ -14,6 +14,7 @@ import { z } from "zod";
 import { invokeLLM, type Message } from "../_core/llm";
 import { traceLangSmith } from "./langsmith-tracer";
 import { getCheckpointer } from "./checkpointer-real";
+import { searchRAG } from "./rag-real";
 
 // Define the agent state schema
 export const AgentStateAnnotation = Annotation.Root({
@@ -357,6 +358,18 @@ export async function processMessage(
   const checkpointer = threadId && userId ? getCheckpointer() : undefined;
   const agent = buildAgentGraph();
 
+  // Retrieve RAG context if not provided
+  let finalRagContext: string | null = ragContext || null;
+  if (!finalRagContext) {
+    try {
+      const ragResult = await searchRAG(userMessage);
+      finalRagContext = ragResult.context || null;
+    } catch (error) {
+      console.warn("[LangGraph Agent] Failed to retrieve RAG context:", error);
+      finalRagContext = null;
+    }
+  }
+
   const state: AgentState = {
     messages: [
       ...previousMessages,
@@ -367,7 +380,7 @@ export async function processMessage(
     interruptMessage: null,
     response: null,
     agentType: null,
-    context: ragContext || null,
+    context: finalRagContext,
   };
 
   try {

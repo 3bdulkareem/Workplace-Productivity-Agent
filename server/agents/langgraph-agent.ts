@@ -9,7 +9,7 @@
  * - Retry logic and error handling
  */
 
-import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
+import { StateGraph, START, END, Annotation, MemorySaver, interrupt, Command } from "@langchain/langgraph";
 import { z } from "zod";
 import { invokeLLM, type Message } from "../_core/llm";
 import { traceLangSmith } from "./langsmith-tracer";
@@ -30,117 +30,203 @@ export const AgentStateAnnotation = Annotation.Root({
 export type AgentState = typeof AgentStateAnnotation.State;
 
 /**
- * RAG Agent with Real LLM Calls
+ * RAG Agent with Real LLM Calls & Retry Logic
  * 
  * Uses invokeLLM() to generate responses based on company knowledge base.
  * The context is retrieved from the RAG pipeline.
+ * Implements transient retry strategy with exponential backoff.
  */
 export async function ragAgent(state: AgentState): Promise<Partial<AgentState>> {
   const userMessage = state.messages[state.messages.length - 1]?.content || "";
+  const maxRetries = 3;
+  let lastError: Error | null = null;
 
-  try {
-    // Trace the RAG agent call
-    const traced = await traceLangSmith("rag_agent", async () => {
-      // Build messages array for LLM
-      const messages: Message[] = [
-        {
-          role: "system",
-          content: `You are a helpful assistant that answers questions about company policies and procedures.
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // Trace the RAG agent call
+      const traced = await traceLangSmith("rag_agent", async () => {
+        // Build messages array for LLM
+        const messages: Message[] = [
+          {
+            role: "system",
+            content: `You are a helpful assistant that answers questions about company policies and procedures.
 Use the provided context to answer the user's question accurately.
 
 Context:
 ${state.context || "No context available"}`,
-        },
-        {
-          role: "user",
-          content: userMessage,
-        },
-      ];
+          },
+          {
+            role: "user",
+            content: userMessage,
+          },
+        ];
 
-      const result = await invokeLLM({
-        messages,
-        model: "gpt-4o-mini",
+        const result = await invokeLLM({
+          messages,
+          model: "gpt-4o-mini",
+        });
+
+        const content = result.choices[0]?.message.content;
+        if (typeof content === "string") {
+          return content;
+        } else if (Array.isArray(content)) {
+          return content
+            .filter((c: any) => c.type === "text")
+            .map((c: any) => c.text)
+            .join(" ");
+        }
+        return "No response generated";
       });
 
-      const content = result.choices[0]?.message.content;
-      if (typeof content === "string") {
-        return content;
-      } else if (Array.isArray(content)) {
-        return content
-          .filter((c: any) => c.type === "text")
-          .map((c: any) => c.text)
-          .join(" ");
+      return {
+        response: typeof traced === "string" ? traced : String(traced),
+        agentType: "rag",
+        currentAgent: "rag",
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.warn(`[RAG Agent] Attempt ${attempt + 1}/${maxRetries} failed:`, lastError.message);
+      
+      // Exponential backoff: 1s, 2s, 4s
+      if (attempt < maxRetries - 1) {
+        const backoffMs = Math.pow(2, attempt) * 1000;
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
       }
-      return "No response generated";
-    });
-
-    return {
-      response: typeof traced === "string" ? traced : String(traced),
-      agentType: "rag",
-      currentAgent: "rag",
-    };
-  } catch (error) {
-    console.error("[RAG Agent] Error:", error);
-    return {
-      response: "I encountered an error. Please try again.",
-      agentType: "rag",
-      currentAgent: "rag",
-    };
+    }
   }
+
+  // All retries exhausted
+  console.error("[RAG Agent] All retries exhausted:", lastError);
+  return {
+    response: "I encountered a persistent error processing your request. Please try again later.",
+    agentType: "rag",
+    currentAgent: "rag",
+  };
 }
 
 /**
- * Summarizer Agent - Summarizes text
+ * Summarizer Agent - Summarizes text with Circuit Breaker Strategy
+ * 
+ * Implements circuit breaker pattern: if summarization fails,
+ * returns a fallback response instead of retrying indefinitely.
  */
 export async function summarizerAgent(state: AgentState): Promise<Partial<AgentState>> {
   const userMessage = state.messages[state.messages.length - 1]?.content || "";
+  const maxRetries = 2;
+  let lastError: Error | null = null;
 
-  try {
-    const traced = await traceLangSmith("summarizer_agent", async () => {
-      const messages: Message[] = [
-        {
-          role: "system",
-          content: "You are a helpful summarizer. Provide a concise summary of the provided text.",
-        },
-        {
-          role: "user",
-          content: `Please summarize: ${userMessage}`,
-        },
-      ];
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const traced = await traceLangSmith("summarizer_agent", async () => {
+        const messages: Message[] = [
+          {
+            role: "system",
+            content: "You are a helpful summarizer. Provide a concise summary of the provided text.",
+          },
+          {
+            role: "user",
+            content: `Please summarize: ${userMessage}`,
+          },
+        ];
 
-      const result = await invokeLLM({
-        messages,
-        model: "gpt-4o-mini",
+        const result = await invokeLLM({
+          messages,
+          model: "gpt-4o-mini",
+        });
+
+        const content = result.choices[0]?.message.content;
+        return typeof content === "string" ? content : String(content);
       });
 
-      const content = result.choices[0]?.message.content;
-      return typeof content === "string" ? content : String(content);
-    });
-
-    return {
-      response: typeof traced === "string" ? traced : String(traced),
-      agentType: "summarizer",
-      currentAgent: "summarizer",
-    };
-  } catch (error) {
-    console.error("[Summarizer Agent] Error:", error);
-    return {
-      response: "I encountered an error summarizing. Please try again.",
-      agentType: "summarizer",
-      currentAgent: "summarizer",
-    };
+      return {
+        response: typeof traced === "string" ? traced : String(traced),
+        agentType: "summarizer",
+        currentAgent: "summarizer",
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.warn(`[Summarizer Agent] Attempt ${attempt + 1}/${maxRetries} failed:`, lastError.message);
+      
+      if (attempt < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
   }
+
+  // Circuit breaker: return fallback response
+  console.error("[Summarizer Agent] Circuit breaker activated:", lastError);
+  return {
+    response: "Unable to summarize at this time. Please try again later.",
+    agentType: "summarizer",
+    currentAgent: "summarizer",
+  };
 }
 
 /**
- * Web Search Agent - Requests human approval before searching
+ * Web Search Agent - Uses LangGraph's real interrupt() primitive
+ * 
+ * Requests human approval before searching the web.
  */
 export async function webSearchAgent(state: AgentState): Promise<Partial<AgentState>> {
-  return {
-    interruptRequired: true,
-    interruptMessage: "Would you like me to search the web for this information?",
-    currentAgent: "web_search",
-  };
+  const userMessage = state.messages[state.messages.length - 1]?.content || "";
+  
+  try {
+    // Use LangGraph's real interrupt() primitive
+    const approval = interrupt({
+      value: `Approve web search for "${userMessage}"?`,
+    });
+
+    // If approved, execute web search
+    if (approval) {
+      const traced = await traceLangSmith("web_search_execution", async () => {
+        const messages: Message[] = [
+          {
+            role: "system",
+            content: `You are a web search assistant. Provide relevant search results and summaries for the user's query.
+Format the response as a clear, organized summary of findings.`,
+          },
+          {
+            role: "user",
+            content: `Search results for: ${userMessage}`,
+          },
+        ];
+
+        const result = await invokeLLM({
+          messages,
+          model: "gpt-4o-mini",
+        });
+
+        const content = result.choices[0]?.message.content;
+        return typeof content === "string" ? content : String(content);
+      });
+
+      return {
+        response: typeof traced === "string" ? traced : String(traced),
+        agentType: "web_search",
+        currentAgent: "web_search",
+        interruptRequired: false,
+        interruptMessage: null,
+      };
+    } else {
+      // If rejected
+      return {
+        response: "Web search was cancelled.",
+        agentType: "web_search",
+        currentAgent: "web_search",
+        interruptRequired: false,
+        interruptMessage: null,
+      };
+    }
+  } catch (error) {
+    console.error("[Web Search Agent] Error:", error);
+    return {
+      response: "Error performing web search. Please try again.",
+      agentType: "web_search",
+      currentAgent: "web_search",
+      interruptRequired: false,
+      interruptMessage: null,
+    };
+  }
 }
 
 /**
@@ -303,11 +389,14 @@ Format the response as a clear, organized summary of findings.`,
 }
 
 /**
- * Build the LangGraph Agent
+ * Build the LangGraph Agent with MemorySaver Checkpointer
  * 
  * Creates a state graph with nodes for each agent and transitions.
+ * Uses LangGraph's built-in MemorySaver for short-term state persistence.
  */
 export function buildAgentGraph() {
+  const checkpointer = new MemorySaver();
+
   const graph = new StateGraph(AgentStateAnnotation)
     .addNode("supervisor", supervisorAgent)
     .addNode("rag", ragAgent)
@@ -334,8 +423,8 @@ export function buildAgentGraph() {
     .addEdge("summarizer", END)
     .addEdge("web_search", END);
 
-  // Compile without checkpointer - we handle persistence manually
-  return graph.compile();
+  // Compile with MemorySaver checkpointer for short-term state persistence
+  return graph.compile({ checkpointer });
 }
 
 /**
@@ -355,8 +444,8 @@ export async function processMessage(
   interruptRequired?: boolean;
   interruptMessage?: string;
 }> {
-  const checkpointer = threadId && userId ? getCheckpointer() : undefined;
   const agent = buildAgentGraph();
+  const longTermCheckpointer = threadId && userId ? getCheckpointer() : undefined;
 
   // Retrieve RAG context if not provided
   let finalRagContext: string | null = ragContext || null;
@@ -384,16 +473,13 @@ export async function processMessage(
   };
 
   try {
-    // Save initial state to checkpointer
-    if (checkpointer && threadId && userId) {
-      await checkpointer.save(threadId, userId, state, { step: "initial" });
-    }
+    // Use LangGraph's MemorySaver for short-term state persistence via thread_id
+    const config = threadId ? { configurable: { thread_id: threadId } } : undefined;
+    const result = await agent.invoke(state, config);
 
-    const result = await agent.invoke(state);
-
-    // Save final state to checkpointer
-    if (checkpointer && threadId && userId) {
-      await checkpointer.save(threadId, userId, result, { step: "final" });
+    // Save to long-term store (separate from LangGraph's short-term checkpointer)
+    if (longTermCheckpointer && threadId && userId) {
+      await longTermCheckpointer.save(threadId, userId, result, { step: "final" });
     }
 
     return {

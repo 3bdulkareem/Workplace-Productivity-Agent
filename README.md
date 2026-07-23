@@ -139,6 +139,33 @@ This project includes comprehensive Vitest tests for database helpers, tRPC proc
 
 To deploy the application, create a checkpoint via the Manus Management UI and click the "Publish" button. The application will be deployed to production with auto-scaling capabilities.
 
+## Related Projects
+
+### EXPLORERS - SDAIA Summer Program
+
+This project is developed as part of the **EXPLORERS** program by the Saudi Data and AI Academy (SDAIAAcademy). The EXPLORERS program is a comprehensive summer initiative designed to nurture the next generation of AI and data science professionals.
+
+**Project Details:**
+- **Repository:** https://github.com/SDAIAAcademy/EXPLORERS
+- **Program Name:** فِطان - برنامج جيل المستقبل الصيفي (Summer Future Generation Program)
+- **Organization:** Saudi Data and AI Academy (SDAIA)
+- **Focus Areas:** AI agents, LangGraph, multi-agent systems, RAG pipelines, Human-in-the-Loop workflows
+
+**Program Highlights:**
+- Interactive educational content with slideshow presentations
+- Hands-on case studies and practical exercises
+- Real-world AI system implementation
+- Capstone project development
+- Professional code quality and testing standards
+
+The Workplace Productivity Agent serves as a capstone project demonstrating the application of concepts learned throughout the EXPLORERS program, including advanced AI agent orchestration, state management, and production-ready system design.
+
+---
+
 ## Contact
 
 For any questions or support, please refer to the documentation or contact the project maintainers.
+
+**Student:** عبدالكريم المالكي  
+**Program:** EXPLORERS - SDAIA Summer Program  
+**Repository:** https://github.com/3bdulkareem/Workplace-Productivity-Agent

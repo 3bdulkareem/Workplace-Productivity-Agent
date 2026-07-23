@@ -102,13 +102,13 @@ This is a full-stack web application for the Workplace Productivity Agent, desig
 
 
 ### Error Handling Strategies (Implemented)
-
-1. **Transient Retry** (RAG Agent): Exponential backoff (1s, 2s, 4s) with 3 max attempts
-
-2. **Circuit Breaker** (Summarizer Agent): Falls back to safe response after 2 failed attempts
-
-3. **User-Fixable Interrupt** (Web Search Agent): Real interrupt() primitive for human decision
-
+1. **Transient Retry** (RAG Agent): Manual exponential backoff (1s, 2s, 4s) with 3 max attempts
+   - Note: Custom implementation using while loop + setTimeout, not LangGraph's RetryPolicy
+2. **Circuit Breaker** (Summarizer Agent): Manual fallback to safe response after 2 failed attempts
+   - Note: Custom implementation of circuit breaker pattern
+3. **User-Fixable Interrupt** (Web Search Agent): Real LangGraph interrupt() primitive for human decision
+   - ✅ Uses native LangGraph interrupt() which properly pauses execution
+   - Note: Resume uses custom logic, not yet using Command pattern
 4. **Graceful Degradation**: All agents return meaningful fallback responses on failure
 
 

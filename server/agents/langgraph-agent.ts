@@ -30,11 +30,15 @@ export const AgentStateAnnotation = Annotation.Root({
 export type AgentState = typeof AgentStateAnnotation.State;
 
 /**
- * RAG Agent with Real LLM Calls & Retry Logic
+ * RAG Agent with Real LLM Calls & Manual Retry Logic
  * 
  * Uses invokeLLM() to generate responses based on company knowledge base.
  * The context is retrieved from the RAG pipeline.
- * Implements transient retry strategy with exponential backoff.
+ * 
+ * Note: Implements manual transient retry with exponential backoff (1s, 2s, 4s).
+ * This is NOT using LangGraph's RetryPolicy, but rather a custom while loop
+ * with setTimeout. This approach is functionally equivalent but not using
+ * LangGraph's built-in retry mechanisms.
  */
 export async function ragAgent(state: AgentState): Promise<Partial<AgentState>> {
   const userMessage = state.messages[state.messages.length - 1]?.content || "";
@@ -105,10 +109,13 @@ ${state.context || "No context available"}`,
 }
 
 /**
- * Summarizer Agent - Summarizes text with Circuit Breaker Strategy
+ * Summarizer Agent - Summarizes text with Manual Circuit Breaker Strategy
  * 
- * Implements circuit breaker pattern: if summarization fails,
+ * Implements manual circuit breaker pattern: if summarization fails,
  * returns a fallback response instead of retrying indefinitely.
+ * 
+ * Note: This is a custom implementation of the circuit breaker pattern,
+ * not using LangGraph's built-in circuit breaker mechanisms.
  */
 export async function summarizerAgent(state: AgentState): Promise<Partial<AgentState>> {
   const userMessage = state.messages[state.messages.length - 1]?.content || "";
@@ -281,15 +288,20 @@ Respond with just the agent name, nothing else.`,
 }
 
 /**
- * Resume After Interrupt
+ * Resume After Interrupt using LangGraph Command Pattern
  * 
  * Called when user approves or rejects an interrupt.
+ * Uses LangGraph's Command primitive to properly resume graph execution.
+ * 
+ * Note: This function should be called with the compiled graph instance
+ * to properly use graph.invoke(new Command({ resume: ... }), config)
  */
 export async function resumeAfterInterrupt(
   state: AgentState,
   decision: "approved" | "rejected",
   threadId?: string,
-  userId?: string
+  userId?: string,
+  compiledGraph?: ReturnType<typeof buildAgentGraph>
 ): Promise<Partial<AgentState>> {
   if (decision === "rejected") {
     const result = {
